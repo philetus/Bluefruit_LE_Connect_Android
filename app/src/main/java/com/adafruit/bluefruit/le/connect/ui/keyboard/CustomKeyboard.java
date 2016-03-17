@@ -104,7 +104,7 @@ public class CustomKeyboard {
         editText.setOnTouchListener(new View.OnTouchListener() {
             @Override
             public boolean onTouch(View view, MotionEvent event) {
-                if (!isCustomKeyboardVisible() || mCurrentKeyboardId != view.getTag()) {
+                if (!isCustomKeyboardVisible() || mCurrentKeyboardId != ((Integer)view.getTag()).intValue()) {
                     view.requestFocus();
                     showCustomKeyboard(view);
                 }

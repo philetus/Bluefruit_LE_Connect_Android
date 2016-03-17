@@ -43,6 +43,17 @@ import com.adafruit.bluefruit.le.connect.mqtt.MqttSettings;
 
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 
+import com.philips.lighting.hue.sdk.PHAccessPoint;
+import com.philips.lighting.hue.sdk.PHBridgeSearchManager;
+import com.philips.lighting.hue.sdk.PHHueSDK;
+import com.philips.lighting.hue.sdk.PHMessageType;
+import com.philips.lighting.hue.sdk.PHSDKListener;
+import com.philips.lighting.model.PHBridge;
+import com.philips.lighting.model.PHHueError;
+import com.philips.lighting.model.PHHueParsingError;
+import com.philips.lighting.model.PHLight;
+import com.philips.lighting.model.PHLightState;
+
 import java.nio.charset.Charset;
 import java.text.DateFormat;
 import java.util.ArrayList;
@@ -55,7 +66,7 @@ public class UartActivity extends UartInterfaceActivity implements BleManager.Bl
 
     // Configuration
     private final static boolean kUseColorsForData = true;
-    private final static boolean kShowUartControlsInTopBar = true;
+    //private final static boolean kShowUartControlsInTopBar = true;
     public final static int kDefaultMaxPacketsToPaintAsText = 500;
 
 
@@ -115,6 +126,14 @@ public class UartActivity extends UartInterfaceActivity implements BleManager.Bl
     private MqttManager mMqttManager;
 
     private int maxPacketsToPaintAsText;
+
+    // hue
+    private PHHueSDK phHueSDK;
+    public static final String HUE_USERNAME = "444143d77dd5cb734b272a1273e63f48";
+    public static final String HUE_IPADDRESS = "192.168.1.14";
+    private static final int HUE_MAX_BRIGHTNESS = 254;
+    private int hueMaxStretch;
+    private int hueMinStretch;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -260,6 +279,25 @@ public class UartActivity extends UartInterfaceActivity implements BleManager.Bl
         mMqttManager = MqttManager.getInstance(this);
         if (MqttSettings.getInstance(this).isConnected()) {
             mMqttManager.connectFromSavedSettings(this);
+        }
+
+        // ******
+        // hue init
+        // ******
+        // Gets an instance of the Hue SDK.
+        phHueSDK = PHHueSDK.create();
+        hueMinStretch = 400;
+        hueMaxStretch = 450;
+
+        // Set the Device Name (name of your app). This will be stored in your bridge whitelist entry.
+        phHueSDK.setAppName("QuickStartApp");
+        phHueSDK.setDeviceName(android.os.Build.MODEL);
+
+        PHAccessPoint ap = new PHAccessPoint();
+        ap.setIpAddress(HUE_IPADDRESS);
+        ap.setUsername(HUE_USERNAME);
+        if (!phHueSDK.isAccessPointConnected(ap)) {
+            phHueSDK.connect(ap);
         }
     }
 
@@ -428,6 +466,7 @@ public class UartActivity extends UartInterfaceActivity implements BleManager.Bl
         mBufferTextView.setVisibility(enabled ? View.GONE : View.VISIBLE);
         mBufferListView.setVisibility(enabled ? View.VISIBLE : View.GONE);
     }
+
 
     // region Menu
     @Override
@@ -656,8 +695,50 @@ public class UartActivity extends UartInterfaceActivity implements BleManager.Bl
                     final int qos = settings.getPublishQos(MqttUartSettingsActivity.kPublishFeed_RX);
                     mMqttManager.publish(topic, data, qos);
                 }
+
+                // publish to hue
+                PHBridge bridge = phHueSDK.getSelectedBridge();
+
+                List<PHLight> allLights = bridge.getResourceCache().getAllLights();
+
+                for (PHLight light : allLights) {
+                    Log.w(TAG, "updating light! " + light.toString());
+                    PHLightState lightState = new PHLightState();
+                    int b = mapHueData(data);
+                    Log.w(TAG, "new brightness -> " + Integer.toString(b));
+                    if (b >= 0) {
+                        lightState.setBrightness(b);
+                        // To validate your lightstate is valid (before sending to the bridge) you can use:
+                        String validState = lightState.validateState();
+                        Log.w(TAG, "light state -> " + lightState.toString() + " : " + validState);
+                        bridge.updateLightState(light, lightState);   // If no bridge response is required then use this simpler form.
+                    }
+                }
             }
         }
+    }
+
+    private int mapHueData(String s) {
+        int d;
+        try {
+            d = Float.valueOf(s).intValue();
+        } catch (NumberFormatException e) {
+            Log.w(TAG, "failed to parse int! " + e.toString());
+            return -1;
+        }
+        if (d > hueMaxStretch) {
+            d = hueMaxStretch;
+            //Log.w(TAG, "new max! " + Integer.toString(d));
+            //hueMaxStretch = d;
+        }
+        if (d < hueMinStretch) {
+            d = hueMinStretch;
+            //Log.w(TAG, "new min! " + Integer.toString(d));
+            //hueMinStretch = d;
+        }
+        d = d - hueMinStretch;
+        d = (d * HUE_MAX_BRIGHTNESS) / (hueMaxStretch - hueMinStretch);
+        return d;
     }
 
     @Override
